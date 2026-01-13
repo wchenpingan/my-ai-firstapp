@@ -4,7 +4,6 @@ pandas
 openpyxl
 pdfplumber
 requests
-sqlite3
 duckduckgo-search
 Pillow
-zhipuai  
+zhipuai
