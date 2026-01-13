@@ -1,44 +1,61 @@
 import streamlit as st
 from openai import OpenAI
+import database  # 导入管理员
 
-st.title("💬 智能对话助手")
+st.title("💬 智能对话助手 (私密版)")
 
-# --- 1. 检查 Key (和刚才一样) ---
+# --- 1. 安检：必须登录才能进 ---
+if "user_name" not in st.session_state or st.session_state["user_name"] is None:
+    st.warning("🔒 请先在 👋 Home 主页登录账号！")
+    st.stop()  # ⛔ 没登录就停车
+
+# 获取当前是谁在登录
+current_user = st.session_state["user_name"]
+
+# --- 2. 检查 Key ---
 if "api_key" not in st.session_state or not st.session_state["api_key"]:
     st.warning("⚠️ 请先回到 👋 Home 主页输入 API Key！")
     st.stop()
-
 api_key = st.session_state["api_key"]
 
-# --- 2. 初始化历史记录 (和刚才一样) ---
+# --- 3. 初始化数据库 (以防万一) ---
+database.create_table()
+
+# --- 4. 加载历史记录 (关键修改！) ---
 if "messages" not in st.session_state:
-    st.session_state["messages"] = [{"role": "assistant", "content": "你好！我是你的 AI 助手，有什么可以帮你的吗？"}]
+    # 👇【核心改动】查账时，带上 current_user (用户名)
+    db_history = database.get_history(current_user)
+
+    if db_history:
+        st.session_state["messages"] = db_history
+    else:
+        st.session_state["messages"] = [{"role": "assistant", "content": f"你好 {current_user}！我是你的专属 AI 助手。"}]
 
 # 显示历史消息
 for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
 
-# --- 3. 处理新消息 (核心变化在这里！) ---
+# --- 5. 处理新消息 ---
 if prompt := st.chat_input():
-    # 3.1 显示用户输入
+    # A. 用户说话
     st.session_state.messages.append({"role": "user", "content": prompt})
     st.chat_message("user").write(prompt)
 
-    # 3.2 调用 AI
+    # 👇【核心改动】存档时，也要带上 current_user
+    database.add_message(current_user, "user", prompt)
+
+    # B. AI 回复
     client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
 
-    # [新知识点] stream=True: 告诉 AI "想出一个字就发给我一个字，别等全部想完"
-    stream = client.chat.completions.create(
-        model="deepseek-chat",
-        messages=st.session_state.messages,
-        stream=True
-    )
-
-    # 3.3 实时显示 (流式输出)
     with st.chat_message("assistant"):
-        # st.write_stream 是 Streamlit 专门用来处理流式数据的神器
-        # 它会自动处理那些碎片的文字，把它拼成流畅的打字机效果
+        stream = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=st.session_state.messages,
+            stream=True
+        )
         response = st.write_stream(stream)
 
-    # 3.4 把完整的回复存入历史 (这样下次刷新还在)
     st.session_state.messages.append({"role": "assistant", "content": response})
+
+    # 👇【核心改动】AI 的话存档也要带上 current_user
+    database.add_message(current_user, "assistant", response)
